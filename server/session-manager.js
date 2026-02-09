@@ -15,21 +15,33 @@ class SessionManager extends EventEmitter {
 
   createSession({ tabName, cwd }) {
     const id = uuidv4();
-    const resolvedCwd = cwd || os.homedir();
+    const rawCwd = cwd || os.homedir();
+    const resolvedCwd = os.platform() === 'win32' ? rawCwd.replace(/\//g, '\\') : rawCwd;
     const name = tabName || path.basename(resolvedCwd);
 
-    // On Windows, spawn through cmd.exe so npm-global commands resolve
-    const shell = os.platform() === 'win32' ? 'cmd.exe' : '/bin/sh';
-    const args = os.platform() === 'win32'
+    const isWin = os.platform() === 'win32';
+    const shell = isWin
+      ? path.join(process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'cmd.exe')
+      : '/bin/sh';
+    const args = isWin
       ? ['/c', 'claude', '--dangerously-skip-permissions']
       : ['-c', 'claude --dangerously-skip-permissions'];
+
+    // Ensure PATH includes npm global bin + System32 for scheduled task contexts
+    const spawnEnv = { ...process.env, TERM: 'xterm-256color' };
+    if (isWin) {
+      const npmBin = path.join(os.homedir(), 'AppData', 'Roaming', 'npm');
+      const sysPath = path.join(process.env.SYSTEMROOT || 'C:\\Windows', 'System32');
+      const existing = spawnEnv.PATH || spawnEnv.Path || '';
+      spawnEnv.PATH = `${npmBin};${sysPath};${existing}`;
+    }
 
     const ptyProcess = pty.spawn(shell, args, {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
       cwd: resolvedCwd,
-      env: { ...process.env, TERM: 'xterm-256color' },
+      env: spawnEnv,
       useConpty: true,
     });
 
